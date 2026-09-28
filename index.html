@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>배움일지 · 신불당소마</title>
+<link rel="apple-touch-icon" href="https://drive.google.com/thumbnail?id=1qBA2AbEs1o0y0dL036k8Kk70EqRfy_Z7&amp;sz=w180">
+<link rel="icon" href="https://drive.google.com/thumbnail?id=1qBA2AbEs1o0y0dL036k8Kk70EqRfy_Z7&amp;sz=w180">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="배움일지">
+<meta name="theme-color" content="#ffffff">
+<style>
+  html,body{margin:0;height:100%;background:#fff;overflow:hidden}
+  iframe{position:fixed;inset:0;width:100%;height:100%;border:0}
+  #msg{font-family:'Malgun Gothic',sans-serif;color:#555;text-align:center;padding:40vh 24px 0;font-size:17px;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="msg">불러오는 중…</div>
+<script>
+  // 학부모 앱(Apps Script) 배포 주소 — parent/올리기.bat의 배포 ID와 같아야 함
+  var APP = 'https://script.google.com/macros/s/AKfycbxlWIKcyRJIoTlemPGlXT2IYm2tUWP5Tx9je8yvlTW5iunXPBxr7Yf0lnpcojBU0Kws/exec';
+
+  var t = new URLSearchParams(location.search).get('t') || '';
+  // 주소에 토큰이 없으면(홈 화면 아이콘 등) 마지막으로 연 토큰을 사용
+  try {
+    if (t) localStorage.setItem('somaParentTok', t);
+    else t = localStorage.getItem('somaParentTok') || '';
+  } catch (e) {}
+
+  if (!t) {
+    document.getElementById('msg').textContent = '학원에서 받은 링크로 열어 주세요.';
+  } else {
+    var f = document.createElement('iframe');
+    f.src = APP + '?t=' + encodeURIComponent(t);
+    f.title = '배움일지';
+    f.onload = function () { var m = document.getElementById('msg'); if (m) m.remove(); };
+    document.body.appendChild(f);
+  }
+</script>
+</body>
+</html>
