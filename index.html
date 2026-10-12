@@ -4,22 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>배움일지 · 신불당소마</title>
-<link rel="apple-touch-icon" href="https://drive.google.com/thumbnail?id=1qBA2AbEs1o0y0dL036k8Kk70EqRfy_Z7&amp;sz=w180">
-<link rel="icon" href="https://drive.google.com/thumbnail?id=1qBA2AbEs1o0y0dL036k8Kk70EqRfy_Z7&amp;sz=w180">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="배움일지">
 <meta name="theme-color" content="#ffffff">
 <style>
   html,body{margin:0;height:100%;background:#fff;overflow:hidden}
   iframe{position:fixed;inset:0;width:100%;height:100%;border:0}
   #msg{font-family:'Malgun Gothic',sans-serif;color:#555;text-align:center;padding:40vh 24px 0;font-size:17px;line-height:1.6}
+  #bar{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:9;
+       display:none;align-items:center;gap:10px;padding:12px 12px 12px 14px;border-radius:14px;
+       background:#243b53;color:#fff;box-shadow:0 8px 28px rgba(0,0,0,.25);
+       font:14px/1.5 -apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif}
+  #bar .tx{flex:1}
+  #bar button{border:0;border-radius:9px;font:inherit;font-weight:700;cursor:pointer}
+  #bar .go{background:#fff;color:#243b53;padding:8px 12px;white-space:nowrap}
+  #bar .x{background:transparent;color:#fff;font-size:20px;line-height:1;padding:2px 4px;opacity:.7}
 </style>
 </head>
 <body>
 <div id="msg">불러오는 중…</div>
+<div id="bar"><div class="tx"></div><button class="go" hidden></button><button class="x" aria-label="닫기">×</button></div>
 <script>
   // 학부모 앱(Apps Script) 배포 주소 — parent/올리기.bat의 배포 ID와 같아야 함
   var APP = 'https://script.google.com/macros/s/AKfycbxlWIKcyRJIoTlemPGlXT2IYm2tUWP5Tx9je8yvlTW5iunXPBxr7Yf0lnpcojBU0Kws/exec';
+
+  // 알림(FCM) 설정 — Firebase 콘솔의 웹 앱 설정값과 웹 푸시 인증서(VAPID 공개키). 공개돼도 되는 값.
+  // apiKey가 비어 있으면 알림 기능은 숨겨짐.
+  var PUSH = {
+    apiKey: '', authDomain: '', projectId: '', messagingSenderId: '', appId: '',
+    vapidKey: ''
+  };
+  var FB = 'https://www.gstatic.com/firebasejs/10.12.2/';
 
   var t = new URLSearchParams(location.search).get('t') || '';
   // 주소에 토큰이 없으면(홈 화면 아이콘 등) 마지막으로 연 토큰을 사용
@@ -36,6 +55,90 @@
     f.title = '배움일지';
     f.onload = function () { var m = document.getElementById('msg'); if (m) m.remove(); };
     document.body.appendChild(f);
+    setupPush();
+  }
+
+  // ─── 알림 ───────────────────────────────────────────
+  function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) {} }
+
+  function bar(text, btn, onBtn, dismissKey) {
+    var b = document.getElementById('bar'), go = b.querySelector('.go');
+    b.querySelector('.tx').textContent = text;
+    go.hidden = !btn; go.textContent = btn || ''; go.onclick = onBtn || null;
+    b.querySelector('.x').onclick = function () {
+      b.style.display = 'none';
+      if (dismissKey) store(dismissKey, String(Date.now()));
+    };
+    b.style.display = 'flex';
+  }
+  function hideBar() { document.getElementById('bar').style.display = 'none'; }
+  function dismissed(k, days) { return Date.now() - Number(store(k) || 0) < days * 864e5; }
+
+  function setupPush() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.register('sw.js').then(function (reg) {
+      clearBadge(reg);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') clearBadge(reg);
+      });
+      if (!PUSH.apiKey) return;
+
+      var ua = navigator.userAgent;
+      var ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+      var standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
+      var ok = 'Notification' in window && 'PushManager' in window;
+
+      if (/KAKAOTALK/i.test(ua)) {
+        if (!dismissed('somaBarKakao', 7))
+          bar('카카오톡 안에서는 알림을 받을 수 없어요. 오른쪽 아래 ⋮(또는 공유) → "다른 브라우저로 열기"를 눌러 주세요.', '', null, 'somaBarKakao');
+        return;
+      }
+      if (ios && !standalone) {
+        if (!dismissed('somaBarIos', 7))
+          bar('알림을 받으려면 아래 공유 버튼(□↑) → "홈 화면에 추가"를 누른 뒤, 홈 화면의 배움일지 아이콘으로 열어 주세요.', '', null, 'somaBarIos');
+        return;
+      }
+      if (!ok) return;
+
+      if (Notification.permission === 'granted') { subscribe(reg); return; }
+      if (Notification.permission === 'denied') return;
+      if (dismissed('somaBarAsk', 3)) return;
+      bar('새 배움일지가 올라오면 알림으로 알려 드릴까요?', '알림 받기', function () {
+        Notification.requestPermission().then(function (p) {
+          if (p === 'granted') {
+            subscribe(reg);
+            bar('알림이 켜졌어요. 새 소식이 올라오면 알려 드릴게요.');
+            setTimeout(hideBar, 3000);
+          } else {
+            bar('알림이 꺼져 있어요. 휴대폰 설정에서 이 앱(또는 브라우저)의 알림을 허용하면 받을 수 있어요.', '', null, 'somaBarAsk');
+          }
+        });
+      }, 'somaBarAsk');
+    }).catch(function () {});
+  }
+
+  function clearBadge(reg) {
+    try { if (navigator.clearAppBadge) navigator.clearAppBadge(); } catch (e) {}
+    try { reg.getNotifications().then(function (ns) { ns.forEach(function (n) { n.close(); }); }); } catch (e) {}
+  }
+
+  // 이 기기의 알림 주소(FCM 토큰)를 학부모 앱에 등록 — 바뀌었거나 7일 지났을 때만
+  function subscribe(reg) {
+    Promise.all([import(FB + 'firebase-app.js'), import(FB + 'firebase-messaging.js')])
+      .then(function (m) {
+        var app = m[0].initializeApp(PUSH);
+        return m[1].getToken(m[1].getMessaging(app), { vapidKey: PUSH.vapidKey, serviceWorkerRegistration: reg });
+      })
+      .then(function (fcm) {
+        if (!fcm) return;
+        var key = t + '|' + fcm, last = (store('somaPushReg') || '').split('#');
+        if (last[0] === key && Date.now() - Number(last[1] || 0) < 7 * 864e5) return;
+        return fetch(APP, {
+          method: 'POST', mode: 'no-cors',
+          body: JSON.stringify({ action: 'subscribe', t: t, fcm: fcm, ua: navigator.userAgent.slice(0, 150) })
+        }).then(function () { store('somaPushReg', key + '#' + Date.now()); });
+      })
+      .catch(function () {});
   }
 </script>
 </body>
