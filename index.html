@@ -53,7 +53,8 @@
     document.getElementById('msg').textContent = '학원에서 받은 링크로 열어 주세요.';
   } else {
     var f = document.createElement('iframe');
-    f.src = APP + '?t=' + encodeURIComponent(t);
+    // w=1: 겉 페이지 안에서 열렸다는 표시 → 학부모 앱이 '새 주소로 열기' 버튼을 숨김
+    f.src = APP + '?t=' + encodeURIComponent(t) + '&w=1';
     f.title = '배움일지';
     f.onload = function () { var m = document.getElementById('msg'); if (m) m.remove(); };
     document.body.appendChild(f);
