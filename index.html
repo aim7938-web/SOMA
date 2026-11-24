@@ -88,13 +88,25 @@
     if (/KAKAOTALK/i.test(ua)) return 'kakao';
     if (ios && !standalone) return 'ios';
     if (!PUSH.apiKey || !('Notification' in window) || !('PushManager' in window) || !('serviceWorker' in navigator)) return 'none';
-    return Notification.permission === 'granted' ? 'on' : Notification.permission === 'denied' ? 'denied' : 'off';
+    if (Notification.permission === 'granted') return store('somaPushOff') === '1' ? 'off' : 'on';
+    return Notification.permission === 'denied' ? 'denied' : 'off';
   }
   function tellApp(src) { try { src.postMessage({ soma: 'push-state', state: pushState() }, '*'); } catch (e) {} }
   window.addEventListener('message', function (ev) {
     var d = ev.data || {};
     if (d.soma === 'push-state?') return tellApp(ev.source);
+    // 앱 오른쪽 위 [알림 OFF] (2026-11-24): 이 기기 등록을 서버에서 지우고 FCM 토큰도 지움. 다시 켜면 새로 등록
+    if (d.soma === 'push-off') {
+      store('somaPushOff', '1'); store('somaPushReg', '');
+      var src = ev.source;
+      unsubscribe().then(function () {
+        bar('알림을 껐어요. 다시 받으려면 오른쪽 위 [알림]을 눌러 주세요.'); setTimeout(hideBar, 3500);
+        tellApp(src);
+      });
+      return;
+    }
     if (d.soma !== 'push') return;
+    store('somaPushOff', '');
     var st = pushState();
     if (st === 'kakao') { bar('카카오톡 안에서는 알림을 받을 수 없어요. 오른쪽 아래 ⋮(또는 공유) → "다른 브라우저로 열기"를 눌러 주세요.'); return tellApp(ev.source); }
     if (st === 'ios') { bar('아이폰은 아래 공유 버튼(□↑) → "홈 화면에 추가"를 누른 뒤, 홈 화면의 배움일지 아이콘으로 열어야 알림이 와요.'); return tellApp(ev.source); }
@@ -143,6 +155,7 @@
       }
       if (!ok) return;
 
+      if (store('somaPushOff') === '1') return;   // 학부모가 앱에서 알림을 끔
       if (Notification.permission === 'granted') { subscribe(reg); return; }
       if (Notification.permission === 'denied') return;
       if (dismissed('somaBarAsk', 3)) return;
@@ -166,11 +179,32 @@
   }
 
   // 이 기기의 알림 주소(FCM 토큰)를 학부모 앱에 등록 — 바뀌었거나 7일 지났을 때만
+  function fbMsg() {
+    return Promise.all([import(FB + 'firebase-app.js'), import(FB + 'firebase-messaging.js')]).then(function (m) {
+      var app = m[0].getApps().length ? m[0].getApp() : m[0].initializeApp(PUSH);
+      return { m: m[1], msg: m[1].getMessaging(app) };
+    });
+  }
+  // 알림 끄기: 서버 '알림구독'에서 이 기기 줄을 지우고 FCM 토큰도 지움 (실패해도 끈 것으로 둠 — 다음에 열 때 다시 등록하지 않음)
+  function unsubscribe() {
+    var reg0 = REG ? Promise.resolve(REG) : navigator.serviceWorker.register('sw.js');
+    return reg0.then(function (reg) {
+      REG = reg;
+      return fbMsg().then(function (f) {
+        return f.m.getToken(f.msg, { vapidKey: PUSH.vapidKey, serviceWorkerRegistration: reg }).then(function (fcm) {
+          if (!fcm) return;
+          return fetch(APP, { method: 'POST', mode: 'no-cors',
+            body: JSON.stringify({ action: 'unsubscribe', t: t, fcm: fcm }) })
+            .then(function () { return f.m.deleteToken(f.msg); });
+        });
+      });
+    }).catch(function () {});
+  }
+
   function subscribe(reg) {
-    Promise.all([import(FB + 'firebase-app.js'), import(FB + 'firebase-messaging.js')])
-      .then(function (m) {
-        var app = m[0].initializeApp(PUSH);
-        return m[1].getToken(m[1].getMessaging(app), { vapidKey: PUSH.vapidKey, serviceWorkerRegistration: reg });
+    fbMsg()
+      .then(function (f) {
+        return f.m.getToken(f.msg, { vapidKey: PUSH.vapidKey, serviceWorkerRegistration: reg });
       })
       .then(function (fcm) {
         if (!fcm) return;
